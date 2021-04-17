@@ -38,6 +38,7 @@
 3.  `make kernel.bin`
 4.  `make bootloader.img`
 5.  `make qemu`
+> `make clean`和`make cleanall`什么的emmmm挺好
 
 ### 问题
 
@@ -49,7 +50,12 @@
 > -   5.`times 510 - ($-$$) db0`是在下面的代码中重复填入0共`510-(当前指令地址-当前部分起始地址)`次，原因是`boot.asm`最后的`boot sector mark`中是`boot signature`，BIOS在`boot sector`偏移510,511的地方找`0x55`和`0xAA`，通过`times`操作填充0可以方便在偏移510,511的位置写`boot signature`
 
 -   1.`I am OK`只要在loader的`log_info GetMemStructOkMsg`后面调用宏`log_info IamOK, <字符串长度，不包括\0>, 4(第四行)`即可，当然要在`GetMemStructOkMsg`下面写`IamOK: db 'I am OK!'`
-
+-   2.确定软盘可启动:通过`fat12_find_file_in_root_dir`来实现，如果找到了，就会进行后续的加载extry等操作，如果没有找到，就会失败，跳转到`not_found`。在`fat12_find_in_root_dir`中，主要通过对`Sector`和`entry`的循环实现顺序查找，通过比对文件名来实现
+-   3.为什么`boot.asm`2.之后可以继续执行`loader.asm`？原因是`boot.asm`中有`jmp LoaderBase:LoaderOffset`指令，而`loader.asm`的代码开始地址就是`0x10000`，所以`jmp`会跳转到`LoaderBase*16+LoaderOffset`的位置，刚好就是`0x1000*16+0x0000 = 0x10000`
+-  4.`boot.asm`与`loader.asm`隔开的原因:
+    -   同一个文件不能存在两个`org`，这样只能用`times`写，还要计算多少个0，很麻烦
+    -   如果将两个代码合在一起，在计算地址的时候就会很复杂，比如要修改`boot`部分的一点代码，可能就要涉及到很多的地址计算的修改。将两个代码在地址上分开方便维护，更新，修改。另外`boot`部分与`loader`部分对不同的硬件，不同的文件系统等，都要进行相应的修改，如果不分开，就很难维护，不如用`jmp`指令跳转来的方便
+    -   还有是放在两个文件里，标签可以重叠不会有影响，因为两个分开编译，方便写程序
 ## 思考题
 
 TBC
