@@ -42,7 +42,8 @@
 > ~~`make clean`和`make cleanall`挺好，然而我不清理~~
 
 ### 问题
-
+> 非注释部分是我选择的，其他部分稍作了解，希望也能够帮我改一改，辛苦了
+#### 第一组问题
 -   1.`xor ax, ax`在将`ax`与其本身异或清零然后保存到ax寄存器中，好处是计算比数据移动要更快，更快的清零，在指令的大小和数量方面最快
 -   2.`jmp $`中`$`表示取当前指令所在的地址，`jmp $`相当于不断将该指令的地址存入PC，形成死循环。只有当中断发生时，才会转去执行中断服务程序
 
@@ -50,10 +51,11 @@
 > -   4.`boot.asm`文件前侧的`org 0x7c00`的用处是定义`boot`代码的绝对地址(比如在定义中断向量表的时候需要定义地址)
 > -   5.`times 510 - ($-$$) db0`是在下面的代码中重复填入0共`510-(当前指令地址-当前部分起始地址)`次，原因是`boot.asm`最后的`boot sector mark`中是`boot signature`，BIOS在`boot sector`偏移510,511的地方找`0x55`和`0xAA`，通过`times`操作填充0可以方便在偏移510,511的位置写`boot signature`
 
+#### 第二组问题
 -   1.`I am OK`只要在loader的`log_info GetMemStructOkMsg`后面调用宏`log_info IamOK, <字符串长度，不包括\0>, 4(第四行)`即可，当然要在`GetMemStructOkMsg`下面写`IamOK: db 'I am OK!'`
--   2.确定软盘可启动:通过`fat12_find_file_in_root_dir`来实现，如果找到了，就会进行后续的加载extry等操作，如果没有找到，就会失败，跳转到`not_found`。在`fat12_find_in_root_dir`中，主要通过对`Sector`和`entry`的循环实现顺序查找，通过比对文件名来实现
--   3.为什么`boot.asm`2.之后可以继续执行`loader.asm`？原因是`boot.asm`中有`jmp LoaderBase:LoaderOffset`指令，而`loader.asm`的代码开始地址就是`0x10000`，所以`jmp`会跳转到`LoaderBase*16+LoaderOffset`的位置，刚好就是`0x1000*16+0x0000 = 0x10000`
--  4.`boot.asm`与`loader.asm`隔开的原因:
+> -   2.确定软盘可启动:通过`fat12_find_file_in_root_dir`来实现，如果找到了，就会进行后续的加载extry等操作，如果没有找到，就会失败，跳转到`not_found`。在`fat12_find_in_root_dir`中，主要通过对`Sector`和`entry`的循环实现顺序查找，通过比对文件名来实现
+> -   3.为什么`boot.asm`2.之后可以继续执行`loader.asm`？原因是`boot.asm`中有`jmp LoaderBase:LoaderOffset`指令，而`loader.asm`的代码开始地址就是`0x10000`，所以`jmp`会跳转到`LoaderBase*16+LoaderOffset`的位置，刚好就是`0x1000*16+0x0000 = 0x10000`
+> -  4.`boot.asm`与`loader.asm`隔开的原因:
     -   同一个文件不能存在两个`org`，这样只能用`times`写，还要计算多少个0，很麻烦
     -   如果将两个代码合在一起，在计算地址的时候就会很复杂，比如要修改`boot`部分的一点代码，可能就要涉及到很多的地址计算的修改。将两个代码在地址上分开方便维护，更新，修改。另外`boot`部分与`loader`部分对不同的硬件，不同的文件系统等，都要进行相应的修改，如果不分开，就很难维护，不如用`jmp`指令跳转来的方便
     -   还有是放在两个文件里，标签可以重叠不会有影响，因为两个分开编译，方便写程序
@@ -67,6 +69,14 @@
     3.  `bootloader`从SD卡上检查GPU固件，将固件写入GPU，随后启动GPU
     4.  GPU启动后检索config.txt, fixup.dat，根绝其内容设置CPU参数和内存分配，然后加载用户代码，启动CPU
     5.  然后CPU执行内核程序
+> 4. config中写了`enable_uart=1`，不是只能用miniUART了吗?
+
+5.  `qemu-user`中包含了`qemu-arm`，所以可以执行`arm64`的`busybox`
+    1.  具体过程:
+        1.  在安装`qemu-user`的过程中会自动安装`qemu-user-binfmt`
+        2.  安装了之后在`/proc/sys/fs/binfmt_misc`中就有很多条目，这些条目代表着各种指令的解释器，在我这里`qemu-arm`的解释器就是`/usr/bin/qemu-arm`
+        3.  当直接执行`./busybox`时，kernel发现是ARM的elf格式，然后就使用`/usr/bin/qemu-arm`解释器(x86)，来跑busybox，在本机上跑的实际是`/usr/bin/qemu-arm`这个解释器
+    2.  `qemu-user`和`qemu-system`的区别就是`qemu-user`是运行单个程序文件，只有`UserSpace emulation`，而`qemu-system`是`full system emulation`，包括`UserSpace emulation`,`kernel emulation`和`hardware emulation`，`qemu-user`相对更快
 
 #### some reference
 
@@ -75,5 +85,9 @@
 [kernel panic](https://www.redhat.com/sysadmin/linux-kernel-panic)
 
 [xor ax ax](https://stackoverflow.com/questions/4749585/what-is-the-meaning-of-xor-in-x86-assembly)
+
+[UART config](https://www.raspberrypi.org/documentation/configuration/uart.md)
+
+[qemu user mode & qemu-system](https://ownyourbits.com/2018/06/13/transparently-running-binaries-from-any-architecture-in-linux-with-qemu-and-binfmt_misc/#:~:text=In%20user%20mode%2C%20QEMU%20doesn%E2%80%99t%20emulate%20all%20the,native%20piece%20of%20software.%20This%20looks%20like%20this)
 
 ###### ~~检测TA是否为自动化给分程序，要是能够给我的报告提点issue就好了，大佬求带，qwq~~
