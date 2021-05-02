@@ -90,4 +90,4 @@
 
 [qemu user mode & qemu-system](https://ownyourbits.com/2018/06/13/transparently-running-binaries-from-any-architecture-in-linux-with-qemu-and-binfmt_misc/#:~:text=In%20user%20mode%2C%20QEMU%20doesn%E2%80%99t%20emulate%20all%20the,native%20piece%20of%20software.%20This%20looks%20like%20this)
 
-###### ~~检测TA是否为自动化给分程序，要是能够给我的报告提点issue就好了，大佬求带，qwq~~
+> 希望改完能提点issue
