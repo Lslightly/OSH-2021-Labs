@@ -30,10 +30,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut out_redirect: bool = false;
             let mut out_append_redirect: bool = false;
             let mut in_redirect: bool = false;
-            if cmd.contains(">") {
-                out_redirect = true;
-            } else if cmd.contains(">>") {
+            if cmd.contains(">>") {
                 out_append_redirect = true;
+            } else if cmd.contains(">") {
+                out_redirect = true;
             } else if cmd.contains("<") {
                 in_redirect = true;
             }
@@ -127,6 +127,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let pipe_out = if out_redirect {
                         unsafe {
                             Stdio::from_raw_fd(File::create(&latter_file).unwrap().into_raw_fd())
+                        }
+                    } else if out_append_redirect {
+                        unsafe {
+                            Stdio::from_raw_fd(OpenOptions::new().append(true).open(&latter_file).unwrap().into_raw_fd())
                         }
                     } else if cmds.peek().is_some() {
                         Stdio::piped()
