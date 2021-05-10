@@ -1,15 +1,21 @@
+extern crate ctrlc;
 extern crate libc;
 extern crate nix;
-use nix::unistd::pipe;
+use libc::{kill, pid_t, SIGINT};
+use std::cell::RefCell;
 use std::env::{self, VarError};
 use std::error::Error;
 use std::fs::{File, OpenOptions};
-use std::io::{self, stderr, stdin, stdout, BufRead, Write};
+use std::io::{stdin, stdout, Write};
 use std::os::unix::io::{FromRawFd, IntoRawFd};
-use std::process::{exit, Child, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use whoami;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    ctrlc::set_handler(move || {
+        kill_exec();
+        println!();
+    }).expect("can't handle Ctrl C");
     loop {
         match prompt() {
             Ok(()) => (),
@@ -30,6 +36,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut out_redirect: bool = false;
             let mut out_append_redirect: bool = false;
             let mut in_redirect: bool = false;
+
+            //  check if there is file redirection
             if cmd.contains(">>") {
                 out_append_redirect = true;
             } else if cmd.contains(">") {
@@ -130,7 +138,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     } else if out_append_redirect {
                         unsafe {
-                            Stdio::from_raw_fd(OpenOptions::new().append(true).open(&latter_file).unwrap().into_raw_fd())
+                            Stdio::from_raw_fd(
+                                OpenOptions::new()
+                                    .append(true)
+                                    .open(&latter_file)
+                                    .unwrap()
+                                    .into_raw_fd(),
+                            )
                         }
                     } else if cmds.peek().is_some() {
                         Stdio::piped()
@@ -190,4 +204,19 @@ fn prompt() -> std::io::Result<()> {
     );
     stdout().flush().unwrap();
     Ok(())
+}
+
+thread_local! {
+    static EXEC_PIDS: RefCell<Vec<u32>> = RefCell::new(Vec::new());
+}
+
+fn kill_exec() {
+    EXEC_PIDS.with(|c| {
+        for pid in c.borrow().iter() {
+            unsafe {
+                kill(*pid as pid_t, SIGINT);
+            }
+        }
+        c.borrow_mut().clear();
+    });
 }
