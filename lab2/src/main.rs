@@ -1,7 +1,11 @@
+extern crate libc;
+extern crate nix;
+use nix::unistd::pipe;
 use std::env::{self, VarError};
 use std::error::Error;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, stderr, stdin, stdout, BufRead, Write};
+use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::process::{exit, Child, Command, Stdio};
 use whoami;
 
@@ -41,6 +45,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Some(cmd) => cmd,
             };
+            let mut former_args: Vec<&str> = Vec::new();
+            let mut latter_file = String::new();
+            for arg in args.next() {
+                if arg != ">>" && arg != ">" && arg != "<" {
+                    former_args.push(arg);
+                }
+            }
+            if out_redirect || out_append_redirect || in_redirect {
+                match args.next() {
+                    Some(file) => {
+                        latter_file = file.to_string();
+                    }
+                    None => {
+                        println!("error occurs when reading args.");
+                        continue;
+                    }
+                }
+            }
+            let former_args = former_args.iter();
             match cmd {
                 "exit" => {
                     //  same as "Ctrl D"
@@ -90,12 +113,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 _ => {
                     //  if there is former program has output, then use its stdout as future stdin, else inherit the shell's stdin as future stdin
-                    let stdin = previous_command.map_or(Stdio::inherit(), |former: Child| {
-                        Stdio::from(former.stdout.unwrap())
-                    });
+                    let pipe_in = if in_redirect {
+                        unsafe {
+                            Stdio::from_raw_fd(File::open(&latter_file).unwrap().into_raw_fd())
+                        }
+                    } else {
+                        previous_command.map_or(Stdio::inherit(), |former: Child| {
+                            Stdio::from(former.stdout.unwrap())
+                        })
+                    };
 
                     //  if there is command following this command, then pipe the output, else inherit the stdout
-                    let stdout = if cmds.peek().is_some() {
+                    let pipe_out = if out_redirect {
+                        unsafe {
+                            Stdio::from_raw_fd(File::create(&latter_file).unwrap().into_raw_fd())
+                        }
+                    } else if cmds.peek().is_some() {
                         Stdio::piped()
                     } else {
                         Stdio::inherit()
@@ -104,9 +137,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     //  previous_command has been moved in "let stdin = ..."
                     previous_command = None;
                     let output = Command::new(cmd)
-                        .args(args)
-                        .stdin(stdin)
-                        .stdout(stdout)
+                        .args(former_args)
+                        .stdin(pipe_in)
+                        .stdout(pipe_out)
                         .spawn(); //  as a child process
                     match output {
                         Ok(out) => {
