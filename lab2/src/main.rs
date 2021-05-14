@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     ctrlc::set_handler(move || {
         kill_exec();
         println!();
-    }).expect("can't handle Ctrl C");
+    })?;
     loop {
         match prompt() {
             Ok(()) => (),
@@ -38,11 +38,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut in_redirect: bool = false;
 
             //  check if there is file redirection
-            if cmd.contains(">>") {
+            if cmd.contains(" >> ") {
                 out_append_redirect = true;
-            } else if cmd.contains(">") {
+            } else if cmd.contains(" > ") {
                 out_redirect = true;
-            } else if cmd.contains("<") {
+            } else if cmd.contains(" < ") {
                 in_redirect = true;
             }
             let mut args = cmd.trim().split_whitespace().peekable(); //  in cmd split with whitespace
@@ -55,9 +55,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             let mut former_args: Vec<&str> = Vec::new();
             let mut latter_file = String::new();
-            for arg in args.next() {
-                if arg != ">>" && arg != ">" && arg != "<" {
-                    former_args.push(arg);
+            loop {
+                match args.next() {
+                    Some(arg) => {
+                    if arg != ">>" && arg != ">" && arg != "<" {
+                        former_args.push(&arg);
+                    } else {
+                        break;
+                    }}
+                    None => {
+                        break;
+                    }
                 }
             }
             if out_redirect || out_append_redirect || in_redirect {
@@ -71,7 +79,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-            let former_args = former_args.iter();
+            for i in 0..former_args.len() {
+                let args = former_args[i];
+                if args.starts_with("'") || args.starts_with("\"") {
+                    former_args[i] = former_args[i].trim_start();
+                }
+                else if args.ends_with("'") || args.ends_with("\"") {
+                    former_args[i] = former_args[i].trim_end();
+                }
+            }
             match cmd {
                 "exit" => {
                     //  same as "Ctrl D"
@@ -79,29 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     return Ok(());
                 }
                 "cd" => {
-                    let dir = match args.next() {
-                        None => match home_path() {
-                            //  "cd\n"
-                            Err(_e) => {
-                                continue;
-                            }
-                            Ok(dir) => dir,
-                        },
-                        Some(dist) => {
-                            //  "cd /path"
-                            if dist == "~" {
-                                //  "cd ~"
-                                match home_path() {
-                                    Err(_e) => {
-                                        continue;
-                                    }
-                                    Ok(dir) => dir,
-                                }
-                            } else {
-                                dist.to_string()
-                            }
-                        }
-                    };
+                    let (dir, _) = path_interpret(former_args[0]);
                     match env::set_current_dir(dir) {
                         //  change the directory as dir defined
                         Err(message) => {
@@ -112,7 +106,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 "export" => {
                     //  set env variable
-                    for arg in args {
+                    for arg in former_args {
                         let mut assign = arg.split('=');
                         let name = assign.next().expect("No variable name");
                         let value = assign.next().expect("No variable value");
@@ -120,6 +114,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
                 _ => {
+                    let special = false;
+                    if out_append_redirect || out_redirect || in_redirect { //  TCP redirection
+
+                    }
+
+                    let former_args = former_args.iter();
                     //  if there is former program has output, then use its stdout as future stdin, else inherit the shell's stdin as future stdin
                     let pipe_in = if in_redirect {
                         unsafe {
@@ -217,6 +217,33 @@ fn kill_exec() {
                 kill(*pid as pid_t, SIGINT);
             }
         }
-        c.borrow_mut().clear();
     });
+}
+
+//  解释路径，如果含特殊地址还需要再解析
+fn path_interpret(origin: &str) -> (String , bool) {
+    let mut goal: String = String::new();
+    let special = false;
+
+    let origin = origin.split("/");
+    for item in origin {
+        match item {
+            "" => {
+                goal.push_str("/");
+            }
+            "~" => {
+                goal.push_str(&home_path().unwrap());
+                goal.push_str("/");
+            }
+            _ => {
+                goal.push_str(item);
+            }
+        }
+    }
+
+    if goal.contains("/dev/fd/") {
+
+    }
+
+    (goal, special)
 }
