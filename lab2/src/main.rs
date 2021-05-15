@@ -17,160 +17,147 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!();
     })?;
     loop {
-        match prompt() {
-            Ok(()) => (),
-            _ => (),
+        if let Err(e) = prompt() {
+            eprintln!("{}", e);
+            panic!();
         }
 
-        let mut line = String::new();
-        stdin().read_line(&mut line)?;
-        if line == "" {
-            //  "Ctrl D" makes the line a empty string
-            println!(); //  print new line to have a better experience and eliminate bad prompts
-            return Ok(());
-        }
-        let mut cmds = line.trim().split("|").peekable(); //  pipes split commands
+        let line = match read_in() {
+            Some(line) => line,
+            None => {
+                return Ok(());
+            }
+        };
+
+        let mut cmds = line.trim().split("|").peekable(); //  "|" splits commands and make cmds peekable
         let mut previous_command = None;
+        let mut pipe_in: Stdio;
+        let mut pipe_out: Stdio;
+
+        let mut previous_pipe = false;
 
         while let Some(cmd) = cmds.next() {
-            let mut out_redirect: bool = false;
-            let mut out_append_redirect: bool = false;
-            let mut in_redirect: bool = false;
-
-            //  check if there is file redirection
-            if cmd.contains(" >> ") {
-                out_append_redirect = true;
-            } else if cmd.contains(" > ") {
-                out_redirect = true;
-            } else if cmd.contains(" < ") {
-                in_redirect = true;
-            }
             let mut args = cmd.trim().split_whitespace().peekable(); //  in cmd split with whitespace
-            let cmd = match args.next() {
+            let prog = match args.next() {
+                //  executable program
                 None => {
                     //  nothing happened in the command
                     continue;
                 }
-                Some(cmd) => cmd,
+                Some(prog) => prog,
             };
-            let mut former_args: Vec<&str> = Vec::new();
-            let mut latter_file = String::new();
-            loop {
-                match args.next() {
-                    Some(arg) => {
-                    if arg != ">>" && arg != ">" && arg != "<" {
-                        former_args.push(&arg);
-                    } else {
-                        break;
-                    }}
+            let mut real_args: Vec<&str> = Vec::new();
+
+            while let Some(&arg) = args.peek() {
+                //  form real args
+                if arg != ">>" && arg != ">" && arg != "<" {
+                    real_args.push(arg);
+                    args.next();
+                } else {
+                    break;
+                }
+            }
+
+            'arg: loop {
+                pipe_in = if previous_pipe {
+                    previous_command.map_or(Stdio::inherit(), |former: Child| {
+                        Stdio::from(former.stdout.unwrap())
+                    })
+                } else {
+                    Stdio::inherit()
+                };
+                pipe_out = Stdio::inherit();
+                match args.peek() {
+                    //  no >, >>, < redirection
                     None => {
-                        break;
+                        pipe_out = if cmds.peek().is_some() {
+                            previous_pipe = true;
+                            Stdio::piped()
+                        } else {
+                            Stdio::inherit()
+                        };
                     }
+                    Some(&arg) => {
+                        if arg == "<" {
+                            if !previous_pipe {
+                                args.next(); //  skip >, >>, <
+                                pipe_in = unsafe {
+                                    Stdio::from_raw_fd(
+                                        File::open(args.next().unwrap()).unwrap().into_raw_fd(),
+                                    )
+                                }
+                            } else {
+                                previous_pipe = false;
+                            }
+                        } else if arg == ">>" {
+                            pipe_out = unsafe {
+                                let output_file = args.next().unwrap();
+                                Stdio::from_raw_fd(
+                                    OpenOptions::new()
+                                        .append(true)
+                                        .open(output_file)
+                                        .unwrap()
+                                        .into_raw_fd(),
+                                )
+                            }
+                        } else if arg == ">" {
+                            pipe_out = unsafe {
+                                let output_file = args.next().unwrap();
+                                Stdio::from_raw_fd(
+                                    OpenOptions::new()
+                                        .write(true)
+                                        .open(output_file)
+                                        .unwrap()
+                                        .into_raw_fd(),
+                                )
+                            }
+                        }
+                    }
+                }
+                previous_command = None;
+                match prog {
+                    "cd" => {
+                        cd(&real_args)?;
+                    }
+                    "echo" => {
+                        previous_command = Some(match echo(pipe_in, pipe_out, &mut real_args) {
+                            Ok(out) => out,
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                continue;
+                            }
+                        });
+                    }
+                    "exit" => {
+                        //  same as "Ctrl D"
+                        println!();
+                        return Ok(());
+                    }
+                    "export" => {
+                        export(&real_args);
+                    }
+                    _ => {
+                        match Command::new(prog)
+                            .args(&real_args)
+                            .stdin(pipe_in)
+                            .stdout(pipe_out)
+                            .spawn()
+                        {
+                            Ok(out) => {
+                                previous_command = Some(out);
+                            }
+                            Err(e) => {
+                                eprintln!("{}", e);
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if let None = args.peek() {
+                    break 'arg;
                 }
             }
-            if out_redirect || out_append_redirect || in_redirect {
-                match args.next() {
-                    Some(file) => {
-                        latter_file = file.to_string();
-                    }
-                    None => {
-                        println!("error occurs when reading args.");
-                        continue;
-                    }
-                }
-            }
-            for i in 0..former_args.len() {
-                let args = former_args[i];
-                if args.starts_with("'") || args.starts_with("\"") {
-                    former_args[i] = former_args[i].trim_start();
-                }
-                else if args.ends_with("'") || args.ends_with("\"") {
-                    former_args[i] = former_args[i].trim_end();
-                }
-            }
-            match cmd {
-                "exit" => {
-                    //  same as "Ctrl D"
-                    println!();
-                    return Ok(());
-                }
-                "cd" => {
-                    let (dir, _) = path_interpret(former_args[0]);
-                    match env::set_current_dir(dir) {
-                        //  change the directory as dir defined
-                        Err(message) => {
-                            println!("{}", message);
-                        }
-                        _ => (),
-                    }
-                }
-                "export" => {
-                    //  set env variable
-                    for arg in former_args {
-                        let mut assign = arg.split('=');
-                        let name = assign.next().expect("No variable name");
-                        let value = assign.next().expect("No variable value");
-                        env::set_var(name, value);
-                    }
-                }
-                _ => {
-                    let special = false;
-                    if out_append_redirect || out_redirect || in_redirect { //  TCP redirection
-
-                    }
-
-                    let former_args = former_args.iter();
-                    //  if there is former program has output, then use its stdout as future stdin, else inherit the shell's stdin as future stdin
-                    let pipe_in = if in_redirect {
-                        unsafe {
-                            Stdio::from_raw_fd(File::open(&latter_file).unwrap().into_raw_fd())
-                        }
-                    } else {
-                        previous_command.map_or(Stdio::inherit(), |former: Child| {
-                            Stdio::from(former.stdout.unwrap())
-                        })
-                    };
-
-                    //  if there is command following this command, then pipe the output, else inherit the stdout
-                    let pipe_out = if out_redirect {
-                        unsafe {
-                            Stdio::from_raw_fd(File::create(&latter_file).unwrap().into_raw_fd())
-                        }
-                    } else if out_append_redirect {
-                        unsafe {
-                            Stdio::from_raw_fd(
-                                OpenOptions::new()
-                                    .append(true)
-                                    .open(&latter_file)
-                                    .unwrap()
-                                    .into_raw_fd(),
-                            )
-                        }
-                    } else if cmds.peek().is_some() {
-                        Stdio::piped()
-                    } else {
-                        Stdio::inherit()
-                    };
-
-                    //  previous_command has been moved in "let stdin = ..."
-                    previous_command = None;
-                    let output = Command::new(cmd)
-                        .args(former_args)
-                        .stdin(pipe_in)
-                        .stdout(pipe_out)
-                        .spawn(); //  as a child process
-                    match output {
-                        Ok(out) => {
-                            previous_command = Some(out);
-                        }
-                        Err(e) => {
-                            eprintln!("{}", e); //  print error message but not panic
-                        }
-                    }
-                }
-            };
         }
-        //  wait for the last command to finish its execution, or the shell will be messed
         if let Some(mut final_command) = previous_command {
             final_command.wait()?;
         }
@@ -221,7 +208,7 @@ fn kill_exec() {
 }
 
 //  解释路径，如果含特殊地址还需要再解析
-fn path_interpret(origin: &str) -> (String , bool) {
+fn path_interpret(origin: &str) -> (String, bool) {
     let mut goal: String = String::new();
     let special = false;
 
@@ -241,9 +228,69 @@ fn path_interpret(origin: &str) -> (String , bool) {
         }
     }
 
-    if goal.contains("/dev/fd/") {
-
-    }
+    if goal.contains("/dev/fd/") {}
 
     (goal, special)
+}
+
+fn variable_interpret(origin: &str) -> String {
+    let mut goal = String::new();
+
+    if let Ok(value) = env::var(origin) {
+        goal = value;
+    }
+    goal
+}
+
+fn read_in() -> Option<String> {
+    let mut line = String::new();
+    stdin().read_line(&mut line).expect("readin error");
+    if line == "" {
+        //  "Ctrl D" makes the line a empty string
+        println!(); //  print new line to have a better experience and eliminate bad prompts
+        return None;
+    }
+    Some(line)
+}
+
+fn cd(real_args: &Vec<&str>) -> Result<(), VarError> {
+    let (dir, _) = path_interpret(if real_args.len() == 0 {
+        "~"
+    } else {
+        &real_args[0]
+    });
+    match env::set_current_dir(dir) {
+        //  change the directory as dir defined
+        Err(message) => {
+            println!("{}", message);
+        }
+        _ => (),
+    }
+    Ok(())
+}
+
+fn echo(pipe_in: Stdio, pipe_out: Stdio, args: &mut Vec<&str>) -> Result<Child, std::io::Error> {
+    let mut new_args: Vec<String> = Vec::new();
+    for i in 0..args.len() {
+        if args[i].starts_with("$") {
+            new_args.push(variable_interpret((args[i].get(1..args[i].len())).unwrap()))
+        }
+        else {
+            new_args.push(String::from(args[i]));
+        }
+    }
+    Command::new("echo")
+        .stdin(pipe_in)
+        .stdout(pipe_out)
+        .args(new_args)
+        .spawn()
+}
+
+fn export(real_args: &Vec<&str>) {
+    for i in 0..real_args.len() {
+        let mut assign = real_args[i].split('=');
+        let name = assign.next().expect("No variable name");
+        let value = assign.next().expect("No variable value");
+        env::set_var(name, value);
+    }
 }
