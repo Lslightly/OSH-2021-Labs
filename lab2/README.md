@@ -8,6 +8,8 @@ Rust Shell
 - [X] Ctrl-C
 - [X] Ctrl-D
 - [X] echo
+- [X] set local variables
+- [X] pass temporary environmental variables to program
 - [ ] ...(more)
 
 ## 管道
@@ -38,6 +40,16 @@ Rust Shell
 
 ## echo
 
-简单的显示环境变量
+简单的显示环境变量，本地变量
+
+## A=1 env
+
+能够临时带变量运行
+
+## set
+
+`set`显示当前所有本地变量
+
+`unset`清空本地变量
 
 - [ ] Strace
