@@ -8,8 +8,10 @@ use std::env::{self, VarError};
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{stdin, stdout, Write};
+use std::iter::Peekable;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::process::{Child, Command, Stdio};
+use std::str::SplitWhitespace;
 use whoami;
 
 type ShellVariable = HashMap<String, String>;
@@ -65,17 +67,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     prog = args.next().unwrap();
                 }
             }
-            let mut real_args: Vec<&str> = Vec::new();
+            let real_args = form_real_args(&mut args);
 
-            while let Some(&arg) = args.peek() {
-                //  form real args
-                if arg != ">>" && arg != ">" && arg != "<" {
-                    real_args.push(arg);
-                    args.next();
-                } else {
-                    break;
-                }
-            }
+            let mut real_args = real_args.iter().map(|x| x.as_str()).collect();
 
             'arg: loop {
                 pipe_in = if previous_pipe {
@@ -132,7 +126,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 previous_command = None;
                 match prog {
                     "cd" => {
-                        cd(&real_args);
+                        cd(&shell_variables, &real_args);
                     }
                     "echo" => {
                         previous_command = Some(
@@ -245,22 +239,24 @@ fn kill_exec() {
 }
 
 //  解释路径，如果含特殊地址还需要再解析
-fn path_interpret(origin: &str) -> (String, bool) {
+fn path_interpret(shell_variables: &ShellVariable, origin: &str) -> (String, bool) {
     let mut goal: String = String::new();
     let special = false;
 
     let origin = origin.split("/");
     for item in origin {
         match item {
-            "" => {
-                goal.push_str("/");
-            }
             "~" => {
                 goal.push_str(&home_path().unwrap());
                 goal.push_str("/");
             }
             _ => {
-                goal.push_str(item);
+                if item.starts_with("$") {
+                    goal.push_str(env_variable_interpret(shell_variables, &item[1..]).as_str());
+                } else {
+                    goal.push_str(item);
+                }
+                goal.push_str("/");
             }
         }
     }
@@ -271,12 +267,16 @@ fn path_interpret(origin: &str) -> (String, bool) {
 }
 
 fn env_variable_interpret(shell_variables: &ShellVariable, origin: &str) -> String {
-    let mut goal = String::new();
+    let goal: String;
 
     if let Ok(value) = env::var(origin) {
         goal = value;
     } else if let Some(value) = shell_variables.get(&origin.to_string()) {
         goal = value.to_string();
+    } else if origin == "~" {
+        goal = env::var("HOME").unwrap();
+    } else {
+        goal = origin.to_string();
     }
     goal
 }
@@ -292,12 +292,15 @@ fn read_in() -> Option<String> {
     Some(line)
 }
 
-fn cd(real_args: &Vec<&str>) {
-    let (dir, _) = path_interpret(if real_args.len() == 0 {
-        "~"
-    } else {
-        &real_args[0]
-    });
+fn cd(shell_variables: &ShellVariable, real_args: &Vec<&str>) {
+    let (dir, _) = path_interpret(
+        &shell_variables,
+        if real_args.len() == 0 {
+            "~"
+        } else {
+            &real_args[0]
+        },
+    );
     match env::set_current_dir(dir) {
         //  change the directory as dir defined
         Err(message) => {
@@ -320,9 +323,10 @@ fn echo(
         if args[i] == "~" {
             new_args.push(home_path().unwrap());
         } else if args[i].starts_with("$") {
-            new_args.push(
-                env_variable_interpret(shell_variables, (args[i].get(1..args[i].len())).unwrap()),
-            )
+            new_args.push(env_variable_interpret(
+                shell_variables,
+                (args[i].get(1..args[i].len())).unwrap(),
+            ))
         } else {
             new_args.push(String::from(args[i]));
         }
@@ -408,4 +412,20 @@ fn split_key_value(real_args: &str) -> Result<(&str, &str), ()> {
         None => "",
     };
     Ok((key, value))
+}
+
+fn form_real_args(args: &mut Peekable<SplitWhitespace>) -> Vec<String> {
+    let mut real_args: Vec<String> = Vec::new();
+
+    while let Some(&arg) = args.peek() {
+        //  form real args
+        if arg != ">>" && arg != ">" && arg != "<" {
+            real_args.push(arg.to_string());
+            args.next();
+        } else {
+            break;
+        }
+    }
+
+    real_args
 }
