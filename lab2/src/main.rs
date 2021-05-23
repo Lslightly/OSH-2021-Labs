@@ -15,9 +15,11 @@ use std::str::SplitWhitespace;
 use whoami;
 
 type ShellVariable = HashMap<String, String>;
+type AliasMap = HashMap<String, String>;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut shell_variables: HashMap<String, String> = HashMap::new();
+    let mut shell_variables: ShellVariable = HashMap::new();
+    let mut alias_map: AliasMap = HashMap::new();
 
     ctrlc::set_handler(move || {
         kill_exec();
@@ -44,6 +46,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut previous_pipe = false;
 
         while let Some(cmd) = cmds.next() {
+            let cmd_string = alias_trans(cmd, &alias_map);
+            let cmd = cmd_string.as_str();
             let mut args = cmd.trim().split_whitespace().peekable(); //  in cmd split with whitespace
             let mut prog = match args.next() {
                 //  executable program
@@ -167,6 +171,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "export" => {
                         export(&real_args);
                     }
+                    "alias" => {
+                        alias_insert(&real_args, &mut alias_map)
+                    }
                     _ => {
                         match Command::new(prog)
                             .env(variable, value)
@@ -260,8 +267,6 @@ fn path_interpret(shell_variables: &ShellVariable, origin: &str) -> (String, boo
             }
         }
     }
-
-    if goal.contains("/dev/fd/") {}
 
     (goal, special)
 }
@@ -414,6 +419,20 @@ fn split_key_value(real_args: &str) -> Result<(&str, &str), ()> {
     Ok((key, value))
 }
 
+fn str_interpret(origin: &str) -> Result<&str, ()> {
+    let origin = origin.trim();
+    if origin.starts_with("'") && origin.ends_with("'") {
+        Ok(origin.trim_matches('\''))
+    } else if origin.starts_with("\"") && origin.ends_with("\"") {
+        Ok(origin.trim_matches('\"'))
+    } else if !origin.starts_with("'") && !origin.starts_with("\"") && !origin.ends_with("'") && !origin.ends_with("\"") {
+        Ok(origin)
+    } else {
+        eprintln!("Str is not wrapped in pairs of \" or \'");
+        Err(())
+    }
+}
+
 fn form_real_args(args: &mut Peekable<SplitWhitespace>) -> Vec<String> {
     let mut real_args: Vec<String> = Vec::new();
 
@@ -428,4 +447,57 @@ fn form_real_args(args: &mut Peekable<SplitWhitespace>) -> Vec<String> {
     }
 
     real_args
+}
+
+fn alias_trans<'a>(origin: &'a str, alias_map: &AliasMap) -> String {
+    let mut parts = origin.trim().split_whitespace().peekable();
+    let cmd = match parts.next() {
+        None => {
+            return String::from("");
+        }
+        Some(cmd) => {
+            cmd
+        }
+    };
+    let mut goal: String = String::new();
+    match alias_map.get(cmd) {
+        Some(real_cmd) => {
+            goal.push_str(real_cmd);
+        }
+        None => {
+            goal.push_str(cmd);
+        }
+    }
+
+    while let Some(args) = parts.next() {
+        goal.push_str(" ");
+        goal.push_str(args);
+    };
+
+    goal
+}
+
+fn alias_insert<'a>(equatation: &'a Vec<&str>, alias_map: &'a mut AliasMap) {
+    if equatation.len() < 1 {
+        eprintln!("not enough args");
+    } else {
+        let mut real_args = String::new();
+        for i in 0..equatation.len() {
+            real_args.push_str(equatation[i]);
+            real_args.push_str(" ");
+        }
+        let (key, value) = match split_key_value(&real_args) {
+            Ok((key, value)) => (key, value),
+            Err(_) => {
+                return ;
+            }
+        };
+        let value = match str_interpret(value) {
+            Ok(v) => v,
+            Err(_) => {
+                return ;
+            }
+        };
+        alias_map.insert(String::from(key), String::from(value));
+    }
 }

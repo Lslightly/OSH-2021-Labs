@@ -10,6 +10,7 @@ Rust Shell
 - [X] echo
 - [X] set local variables
 - [X] pass temporary environmental variables to program
+- [X] alias
 - [ ] ...(more)
 
 ## 管道
@@ -70,3 +71,4 @@ Rust Shell
     -   获得或者改变调用线程的信号屏蔽(`signal mask`)，`signal mask`用来表示对于调用者来说正在被阻塞的信号
     -   `how`可以为`SIG_BLOCK`,`SIG_UNBLOCK`,`SIG_SETMASK`，分别表示将`set`加入现有的阻塞信号集;将`set`中的阻塞信号集从现有的阻塞信号集中移除;将现有的阻塞信号集设置为`set`。原来的`signal mask`值将存储在`oldset`中，如果`oldset`不是`NULL`的话。
 
+> 很多地方采用直接unwrap()的方式，因此健壮性不是很强
