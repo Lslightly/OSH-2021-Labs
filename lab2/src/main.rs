@@ -24,9 +24,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     ctrlc::set_handler(move || {
         kill_exec();
         println!("");
-        if let Err(e) = prompt() {
-            eprintln!("{}", e);
-        }
     })?;
     loop {
         if let Err(e) = prompt() {
@@ -155,13 +152,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     "set" => {
                         previous_command =
-                            match set(&real_args, &mut shell_variables, pipe_in, pipe_out) {
+                            match set(&real_args, &mut shell_variables, pipe_in, pipe_out, variable, value) {
                                 Ok(out) => out,
                                 Err(e) => {
                                     eprintln!("{}", e);
                                     continue;
                                 }
-                            }
+                            };
                     }
                     "unset" => {
                         shell_variables.clear();
@@ -174,9 +171,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "export" => {
                         export(&real_args);
                     }
-                    "alias" => {
-                        alias_insert(&real_args, &mut alias_map)
-                    }
+                    "alias" => alias_insert(&real_args, &mut alias_map),
                     _ => {
                         match Command::new(prog)
                             .env(variable, value)
@@ -284,7 +279,7 @@ fn env_variable_interpret(shell_variables: &ShellVariable, origin: &str) -> Stri
     } else if origin == "~" {
         goal = env::var("HOME").unwrap();
     } else {
-        goal = origin.to_string();
+        goal = String::from("");
     }
     goal
 }
@@ -381,8 +376,11 @@ fn set(
     shell_variables: &mut ShellVariable,
     pipe_in: Stdio,
     pipe_out: Stdio,
+    variable: &str,
+    value: &str,
 ) -> Result<Option<Child>, std::io::Error> {
     let previous_command = match Command::new("printenv")
+        .env(variable, value)
         .stdin(pipe_in)
         .stdout(pipe_out)
         .spawn()
@@ -428,7 +426,11 @@ fn str_interpret(origin: &str) -> Result<&str, ()> {
         Ok(origin.trim_matches('\''))
     } else if origin.starts_with("\"") && origin.ends_with("\"") {
         Ok(origin.trim_matches('\"'))
-    } else if !origin.starts_with("'") && !origin.starts_with("\"") && !origin.ends_with("'") && !origin.ends_with("\"") {
+    } else if !origin.starts_with("'")
+        && !origin.starts_with("\"")
+        && !origin.ends_with("'")
+        && !origin.ends_with("\"")
+    {
         Ok(origin)
     } else {
         eprintln!("Str is not wrapped in pairs of \" or \'");
@@ -458,9 +460,7 @@ fn alias_trans<'a>(origin: &'a str, alias_map: &AliasMap) -> String {
         None => {
             return String::from("");
         }
-        Some(cmd) => {
-            cmd
-        }
+        Some(cmd) => cmd,
     };
     let mut goal: String = String::new();
     match alias_map.get(cmd) {
@@ -475,7 +475,7 @@ fn alias_trans<'a>(origin: &'a str, alias_map: &AliasMap) -> String {
     while let Some(args) = parts.next() {
         goal.push_str(" ");
         goal.push_str(args);
-    };
+    }
 
     goal
 }
@@ -492,13 +492,13 @@ fn alias_insert<'a>(equatation: &'a Vec<&str>, alias_map: &'a mut AliasMap) {
         let (key, value) = match split_key_value(&real_args) {
             Ok((key, value)) => (key, value),
             Err(_) => {
-                return ;
+                return;
             }
         };
         let value = match str_interpret(value) {
             Ok(v) => v,
             Err(_) => {
-                return ;
+                return;
             }
         };
         alias_map.insert(String::from(key), String::from(value));

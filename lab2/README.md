@@ -47,6 +47,8 @@ Rust Shell
 
 能够临时带变量运行
 
+`a=1 set | grep a=1`与`set | grep a=1`效果不同(假设之前没有设置a=1)，其他可执行程序运行应该也可以
+
 ## set
 
 `set`显示当前所有本地变量
@@ -72,3 +74,9 @@ Rust Shell
     -   `how`可以为`SIG_BLOCK`,`SIG_UNBLOCK`,`SIG_SETMASK`，分别表示将`set`加入现有的阻塞信号集;将`set`中的阻塞信号集从现有的阻塞信号集中移除;将现有的阻塞信号集设置为`set`。原来的`signal mask`值将存储在`oldset`中，如果`oldset`不是`NULL`的话。
 
 > 很多地方采用直接unwrap()的方式，因此健壮性不是很强
+
+## alias
+
+`alias ll='ls -l'`
+
+稍微简单匹配了一下`'`和`"`，当然不支持换行等
