@@ -23,7 +23,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     ctrlc::set_handler(move || {
         kill_exec();
-        println!();
+        println!("");
+        if let Err(e) = prompt() {
+            eprintln!("{}", e);
+        }
     })?;
     loop {
         if let Err(e) = prompt() {
