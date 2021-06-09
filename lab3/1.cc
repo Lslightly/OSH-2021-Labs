@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <string>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -7,20 +8,64 @@
 #include <pthread.h>
 #define MESSAGE_OFFSET 8    //  "Message:" length
 
-struct Pipe {
+using namespace std;
+
+typedef struct Pipe {
     int fd_send;
     int fd_recv;
-};
+}Pipe;
+
+typedef struct Msg {
+    char * buffer;
+    int len;
+}Msg;
+
+bool split_enter(char * &data, Msg &msg, char * &former_string);
 
 void *handle_chat(void *data) {
     struct Pipe *pipe = (struct Pipe *)data;
-    char buffer[1024] = "Message:";
+    char buffer[10] = "";
+    char prompt[1048600] = "Message:";
+    char *former_string;
+    former_string = (char *)malloc(sizeof(char) * 1048600);
+    strcpy(former_string, "");
     ssize_t len;
-    int messages = 0;
-    while ((len = recv(pipe->fd_send, buffer + MESSAGE_OFFSET, 5, 0)) > 0) {
-        send(pipe->fd_recv, buffer, len + MESSAGE_OFFSET, 0);
+    ssize_t len_before = 0;
+    Msg msg;
+    char * readin = nullptr;
+    while ((len = recv(pipe->fd_send, buffer, 5, 0)) > 0) {
+        readin = buffer;
+        if (!split_enter(readin, msg, former_string)) continue;
+        strcpy(prompt+MESSAGE_OFFSET, msg.buffer);
+        for (int i = 0; i < (msg.len + MESSAGE_OFFSET) / 10; i++) {
+            send(pipe->fd_recv, prompt+i*10, 10, 0);
+        }
+        send(pipe->fd_recv, prompt+(msg.len + MESSAGE_OFFSET)/10*10, msg.len + MESSAGE_OFFSET - (msg.len+MESSAGE_OFFSET)/10*10, 0);
+        free(msg.buffer);
+        msg.len = 0;
     }
     return NULL;
+}
+
+bool split_enter(char * &data, Msg &msg, char * &former_string) {
+    char * split_pos = nullptr;
+    if (split_pos = strstr(data, "\n")) {   //  find \n
+        msg.buffer = (char *)malloc(sizeof(char) * (strlen(former_string) + split_pos-data+1));
+        msg.len = 0;
+        int data_len = strlen(data);
+        *split_pos = '\0';
+        strcat(former_string, data);
+        strcpy(msg.buffer, former_string);
+        strcat(msg.buffer, "\n");
+        memset(former_string, 0, sizeof former_string);
+        memset(data, 0, sizeof data);
+        msg.len = strlen(msg.buffer);
+        return true;
+    } else {
+        strcat(former_string, data);
+        memset(data, 0, sizeof data);
+        return false;
+    }
 }
 
 int main(int argc, char **argv) {
