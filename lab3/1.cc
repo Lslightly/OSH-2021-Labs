@@ -20,6 +20,23 @@ typedef struct Msg {
     int len;
 }Msg;
 
+/// Description:
+///     服务器处理聊天
+/// Parameter: 
+///     data:    传入的管道连接sender, receiver
+/// Return:
+///     void
+void *handle_chat(void *data);
+
+/// Description:
+///     将recv得到的消息拼接到原有消息之上
+/// Parameter:
+///     data:   传入的消息
+///     msg:    整合得到的消息，在发现\\n后得到
+///     former_string:  在还没有发现\\n之前先将之前的字符串存起来
+/// Return:
+///     true:   得到一条消息，可以发送
+///     false:  没有得到一条完整的消息，还不可以发送，还需要继续recv得到新的字符串直到发现\\n
 bool split_enter(char * &data, Msg &msg, char * &former_string);
 
 void *handle_chat(void *data) {
@@ -30,7 +47,6 @@ void *handle_chat(void *data) {
     former_string = (char *)malloc(sizeof(char) * 1048600);
     strcpy(former_string, "");
     ssize_t len;
-    ssize_t len_before = 0;
     Msg msg;
     char * readin = nullptr;
     while ((len = recv(pipe->fd_send, buffer, 5, 0)) > 0) {
@@ -44,6 +60,7 @@ void *handle_chat(void *data) {
         free(msg.buffer);
         msg.len = 0;
     }
+    free(former_string);
     return NULL;
 }
 
