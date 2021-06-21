@@ -68,9 +68,23 @@ free_resource() {
 }
 ```
 
-## 异步I/O聊天室
+传统阻塞I/O服务模型
+*****
+单Reactor单线程
 
-TCB
+## I/O复用/异步I/O聊天室
+
+创建fd数组，用来存放所有fd
+
+进入循环，首先初始化和刷新fdSet（这里包括了server_fd，因为会有accept接受新连接服务端的请求），然后调用`select`函数，根据`select`函数的返回值result判断
+
+如果result<0，说明select发生错误
+
+如果result == 0，说明select发生超时异常，但是这里设置为NULL则不会发生超时
+
+否则的话说明有动静，比如有消息或者有客户端退出或者有新连接请求。这样的话，首先判断客户端的请求`which_client`，是否有接受或退出的请求，分别处理，接收则还要发送，退出则close(fd)等
+
+然后是server判断是否有accept，根据当前客户数量，判断是否接受请求，如果能接受请求，那么加入，否则，发送拒绝信息，close(new_fd)
 
 ## async/await
 

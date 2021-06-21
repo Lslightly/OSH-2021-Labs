@@ -11,7 +11,7 @@
 using namespace std;
 
 #define MESSAGE_OFFSET 8  //  Message:字串的长度
-#define MAX_GUEST 32      //  最大顾客数量
+#define MAX_GUESTS 32      //  最大顾客数量
 #define SEND_LEN_EACH 10  //  每次发送(send)的长度
 #define MAX_BYTES 1048600 //  最大发送字节数
 
@@ -21,9 +21,9 @@ int connect_numbers = 0;
 int debug_info_number = 0;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
-bool quit_done = true;
-pthread_t quit_thread = 0;
-int quit_fd = 0;
+// bool quit_done = true;
+// pthread_t quit_thread = 0;
+// int quit_fd = 0;
 
 //  客户端结构体
 typedef struct Guest
@@ -32,7 +32,7 @@ typedef struct Guest
     pthread_t thread; //  线程
 } Guest;
 
-Guest guests[MAX_GUEST];
+Guest guests[MAX_GUESTS];
 
 void debug_info();
 
@@ -67,6 +67,8 @@ inline void fd_close(int fd)
     printf("fd %d is closed\n", fd);
 }
 
+inline void refresh(int fd);
+
 /// Description:
 ///     服务器处理聊天
 /// Parameter:
@@ -88,12 +90,11 @@ void *handle_quit(void *data);
 /// Parameter:
 ///     data:   传入的消息
 ///     msgbuffer:    message buffer
-///     msg_len:    message length
 ///     former_string:  在还没有发现\\n之前先将之前的字符串存起来
 /// Return:
 ///     true:   得到一条消息，可以发送
 ///     false:  没有得到一条完整的消息，还不可以发送，还需要继续recv得到新的字符串直到发现\\n
-bool split_enter(char *&data, char *&msgbuffer, ssize_t &msg_len, char *&former_string);
+bool split_enter(string &data, string &former_string);
 
 /// Description:
 ///     释放资源
@@ -106,26 +107,22 @@ bool split_enter(char *&data, char *&msgbuffer, ssize_t &msg_len, char *&former_
 ///     nothing
 inline void free_resource(int fd, char *buffer, char *former_string, char *prompt);
 
-void send_to_guests(char *prompt, char *msgbuffer, int fd_send, int msg_len)
+void send_to_guests(string &msgbuffer, int fd_send)
 {
+    string prompt = "Message:";
     printf("client %d will send message\n", fd_send);
-    strcpy(prompt + MESSAGE_OFFSET, msgbuffer);
-    for (int j = 0; j < number_guests; j++)
-    {
-        if (guests[j].fd != fd_send)
-        {
-            for (int i = 0; i < (msg_len + MESSAGE_OFFSET) / SEND_LEN_EACH; i++)
-            {
-                send(guests[j].fd, prompt + i * 10, 10, 0);
-            }
-        }
-    }
+    prompt += msgbuffer;
+    int msg_len = msgbuffer.length();
     for (int j = 0; j < number_guests; j++)
     {
         if (guests[j].fd != fd_send)
         {
             printf("client %d send to client %d\n", fd_send, guests[j].fd);
-            send(guests[j].fd, prompt + (msg_len + MESSAGE_OFFSET) / SEND_LEN_EACH * SEND_LEN_EACH, msg_len + MESSAGE_OFFSET - (msg_len + MESSAGE_OFFSET) / 10 * 10, 0);
+            for (int i = 0; i < (msg_len + MESSAGE_OFFSET) / SEND_LEN_EACH; i++)
+            {
+                send(guests[j].fd, &prompt[0] + i * SEND_LEN_EACH, SEND_LEN_EACH, 0);
+            }
+            send(guests[j].fd, &prompt[0] + (msg_len + MESSAGE_OFFSET) / SEND_LEN_EACH * SEND_LEN_EACH, msg_len + MESSAGE_OFFSET - (msg_len + MESSAGE_OFFSET) / SEND_LEN_EACH * SEND_LEN_EACH, 0);
         }
     }
 }
@@ -136,24 +133,19 @@ void *handle_chat(void *data)
     //  initialise
     int fd_send = *((int *)(data));
 
-    char *buffer = (char *)malloc(sizeof(char) * 10);
-    strcpy(buffer, "");
+    char buffer[SEND_LEN_EACH] = "";
 
-    char *prompt = (char *)malloc(sizeof(char) * 1048600);
-    strcpy(prompt, "Message:");
-
-    char *former_string = (char *)malloc(sizeof(char) * 1048600);
-    strcpy(former_string, "");
+    string readin;
 
     ssize_t msg_len = 0;
-    char *msgbuffer = nullptr;
-    char *readin = nullptr;
+    string msgbuffer;
     bool in_critical = false;
     int len = 0;
 
     while (1)
     {
-        len = recv(fd_send, buffer, 5, 0);
+        len = recv(fd_send, buffer, SEND_LEN_EACH, 0);
+        readin = buffer;
         if (len <= ssize_t(0))
         { //  guest quits
             printf("length is %d. client %d quits.\n", len, fd_send);
@@ -165,64 +157,52 @@ void *handle_chat(void *data)
             mutex_lock(fd_send);
         }
         in_critical = true;
-        readin = buffer;
-        if (!split_enter(readin, msgbuffer, msg_len, former_string))
+        if (!split_enter(readin, msgbuffer))
             continue;
 
         //  receive full message
-        send_to_guests(prompt, msgbuffer, fd_send, msg_len);
-        free(msgbuffer);
+        send_to_guests(msgbuffer, fd_send);
+        msgbuffer = "";
         in_critical = false;
         mutex_unlock(fd_send);
     }
-    free_resource(fd_send, buffer, former_string, prompt);
+    refresh(fd_send);
     return NULL;
 }
 
-bool split_enter(char *&data, char *&msgbuffer, ssize_t &msg_len, char *&former_string)
-{
-    char *split_pos = nullptr;
-    if (split_pos = strstr(data, "\n"))
-    { //  find \n
-        msgbuffer = (char *)malloc(sizeof(char) * (strlen(former_string) + split_pos - data + 1));
-        strcpy(msgbuffer, "");
-        msg_len = 0;
-        *split_pos = '\0';
-        strcat(former_string, data);
-        strcpy(msgbuffer, former_string);
-        strcat(msgbuffer, "\n");
-        strcpy(former_string, "");
-        strcpy(data, "");
-        msg_len = strlen(msgbuffer);
+bool split_enter(string &data, string &former_string) {
+    ssize_t split_pos = 0;
+    split_pos = data.find('\n');
+    if (split_pos != string::npos) { //  find \n
+        data.erase(split_pos);
+        former_string += data;
+        former_string += '\n';
         return true;
-    }
-    else
-    {
-        strcat(former_string, data);
-        strcpy(data, "");
+    } else {
+        former_string += data;
         return false;
     }
 }
 
-void *handle_quit(void *data)
-{
-    while (1)
-    {
-        while (quit_done)
-        {
-        }
-        printf("detection thread is working.\n");
-        int err;
-        // if ((err = shutdown(quit_fd, SHUT_RDWR)) == 0) {
-        //     printf("shutdown client %d succeeded.\n", quit_fd);
-        // } else {
-        //     printf("shutdown client %d failed.\nthe errno is %d.\n", quit_fd, err);
-        // }
-        // fd_close(quit_fd);
-        join(quit_thread);
-        quit_done = true;
-    }
-}
+// void *handle_quit(void *data)
+// {
+//     while (1)
+//     {
+//         while (quit_done)
+//         {
+//         }
+//         printf("detection thread is working.\n");
+//         int err;
+//         // if ((err = shutdown(quit_fd, SHUT_RDWR)) == 0) {
+//         //     printf("shutdown client %d succeeded.\n", quit_fd);
+//         // } else {
+//         //     printf("shutdown client %d failed.\nthe errno is %d.\n", quit_fd, err);
+//         // }
+//         // fd_close(quit_fd);
+//         join(quit_thread);
+//         quit_done = true;
+//     }
+// }
 
 /// Description:
 ///     refresh guests, will decrease guests if guest don't reply
@@ -300,7 +280,7 @@ int main(int argc, char **argv)
         perror("bind");
         return 1;
     }
-    if (listen(fd, 32))
+    if (listen(fd, MAX_GUESTS))
     {
         perror("listen");
         return 1;
@@ -309,7 +289,7 @@ int main(int argc, char **argv)
     // pthread_create(&detect_quit_thread, NULL, handle_quit, NULL);
     while (1)
     {
-        if (number_guests >= MAX_GUEST)
+        if (number_guests >= MAX_GUESTS)
         {
             break;
         }
