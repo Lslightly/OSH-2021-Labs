@@ -57,10 +57,14 @@ main() {
         //  ...
 }
 
-refresh {
-            mutex_lock(fd_send);
-            number_guests--;
-            mutex_unlock(fd_send);
+free_resource() {
+    mutex_lock(fd);
+    printf("errno: %d.\n", errno);
+    free(buffer);
+    free(former_string);
+    free(prompt);
+    refresh(fd);
+    mutex_unlock(fd);
 }
 ```
 

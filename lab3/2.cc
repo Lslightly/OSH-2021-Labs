@@ -259,8 +259,8 @@ inline void free_resource(int fd, char *buffer, char *former_string, char *promp
     free(buffer);
     free(former_string);
     free(prompt);
-    mutex_unlock(fd);
     refresh(fd);
+    mutex_unlock(fd);
 }
 
 void debug_info()
