@@ -11,7 +11,7 @@
 
 using namespace std;
 
-#define MAX_GUESTS 2
+#define MAX_GUESTS 32
 #define MESSAGE_OFFSET 8
 #define MAX_BYTES 1048600
 #define BUF_SIZE 10
