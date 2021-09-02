@@ -1,7 +1,8 @@
 extern crate ctrlc;
 extern crate libc;
 extern crate nix;
-use libc::{kill, pid_t, SIGINT};
+extern crate whoami;
+use libc::{kill, pid_t};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env::{self, VarError};
@@ -12,7 +13,10 @@ use std::iter::Peekable;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::process::{Child, Command, Stdio};
 use std::str::SplitWhitespace;
-use whoami;
+use std::{thread, process, io};
+use nix::unistd::{alarm, Pid};
+use nix::sys::signal::{self, Signal};
+use signal_hook::{iterator, consts::{SIGINT, SIGQUIT, SIGALRM}};
 
 type ShellVariable = HashMap<String, String>;
 type AliasMap = HashMap<String, String>;
@@ -21,10 +25,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut shell_variables: ShellVariable = HashMap::new();
     let mut alias_map: AliasMap = HashMap::new();
 
-    ctrlc::set_handler(move || {
-        kill_exec();
-        println!("");
-    })?;
+    if let Err(_) = register_signal_handlers() {
+        println!("Signals are not handled properly");
+    }
+
     loop {
         if let Err(e) = prompt() {
             eprintln!("{}", e);
@@ -289,7 +293,7 @@ fn read_in() -> Option<String> {
     stdin().read_line(&mut line).expect("readin error");
     if line == "" {
         //  "Ctrl D" makes the line a empty string
-        println!(); //  print new line to have a better experience and eliminate bad prompts
+        println!("exit"); //  print new line to have a better experience and eliminate bad prompts
         return None;
     }
     Some(line)
@@ -503,4 +507,40 @@ fn alias_insert<'a>(equatation: &'a Vec<&str>, alias_map: &'a mut AliasMap) {
         };
         alias_map.insert(String::from(key), String::from(value));
     }
+}
+
+/// Register UNIX system signals
+fn register_signal_handlers() -> Result<(), Box<dyn Error>>  {
+    let mut signals = iterator::Signals::new(&[SIGINT, SIGALRM, SIGQUIT])?;
+
+    // signal execution is passed to the child process
+    thread::spawn(move || {
+        for sig in signals.forever() {
+            match sig {
+                SIGALRM => {
+                    write_to_stdout("This's taking too long...\n").unwrap(); // not safe
+                    // when alarm goes off it kills child process
+                    signal::kill(Pid::from_raw(0), Signal::SIGINT).unwrap()
+                },
+                SIGQUIT => {
+                    write_to_stdout("Good bye!\n").unwrap(); // not safe
+                    process::exit(0);
+                },
+                SIGINT => {
+                    println!("");
+                    assert_ne!(0, sig) // assert that the signal is sent
+                }
+                _ => continue,
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// flushes text buffer to the stdout
+fn write_to_stdout(text: &str) -> io::Result<()> {
+    io::stdout().write(text.as_ref())?;
+    io::stdout().flush()?; // to the terminal
+    Ok(())
 }
